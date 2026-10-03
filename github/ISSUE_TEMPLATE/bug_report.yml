@@ -1,0 +1,27 @@
+name: Bug report / 问题报告
+description: Report reproducible behavior without private images or prompts.
+title: "[Bug] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: Do not upload personal photos, workflows, passwords or keys. 请勿上传个人图片、工作流、密码或密钥。
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 环境
+      description: OS, device, app language and relevant image dimensions.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps and result / 操作步骤及实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / 预期结果
+    validations:
+      required: true
