@@ -1,0 +1,15 @@
+* text=auto eol=lf
+*.cs text
+*.java text
+*.py text
+*.ps1 text
+*.md text
+*.json text
+*.yml text
+*.xml text
+*.ico binary
+*.png binary
+*.jpg binary
+*.zip binary
+*.apk binary
+*.exe binary
