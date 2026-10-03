@@ -1,0 +1,10 @@
+name: Feature request / 功能建议
+description: Describe the task and desired behavior.
+title: "[Feature] "
+body:
+  - type: textarea
+    id: request
+    attributes:
+      label: Use case and desired behavior / 使用场景及预期行为
+    validations:
+      required: true
