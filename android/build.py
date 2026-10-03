@@ -1,0 +1,121 @@
+"""Build the native Android app with SDK 35 and JDK 17+, without Gradle."""
+from pathlib import Path
+import hashlib
+import os
+import secrets
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+
+ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parent
+TEST = '--test' in sys.argv
+SUFFIX = '.exe' if os.name == 'nt' else ''
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+
+def configured_path(*names):
+    for name in names:
+        if os.environ.get(name):
+            return Path(os.environ[name]).expanduser().resolve()
+    raise RuntimeError('Set one of: ' + ', '.join(names))
+
+
+def run(args):
+    result = subprocess.run([str(x) for x in args], cwd=ROOT, capture_output=True,
+                            text=True, encoding='utf-8', errors='replace')
+    if result.returncode:
+        raise RuntimeError('Build command failed: ' + str(args[0]) + '\n' + result.stdout + result.stderr)
+    if result.stdout.strip():
+        print(result.stdout.strip(), flush=True)
+
+
+def main():
+    sdk = configured_path('AIPT_SDK_ROOT', 'ANDROID_SDK_ROOT', 'ANDROID_HOME')
+    java = configured_path('AIPT_JAVA_HOME', 'JAVA_HOME')
+    tools = sdk / 'build-tools/35.0.0'
+    platform = sdk / 'platforms/android-35/android.jar'
+    for required in (platform, tools / ('aapt2' + SUFFIX), java / ('bin/javac' + SUFFIX)):
+        if not required.is_file():
+            raise RuntimeError('Required build dependency not found: ' + str(required))
+    base = REPO / 'build/android'
+    base.mkdir(parents=True, exist_ok=True)
+    out = Path(tempfile.mkdtemp(prefix='test-' if TEST else 'release-', dir=base))
+    assets = out / 'assets'
+    assets.mkdir()
+    notice = (REPO / 'LICENSE').read_text(encoding='utf-8') + '\n\n' + (REPO / 'THIRD_PARTY_NOTICES.md').read_text(encoding='utf-8')
+    (assets / 'NOTICE.md').write_text(notice, encoding='utf-8')
+    if TEST:
+        with zipfile.ZipFile(ROOT / 'tests/fixtures.zip') as archive:
+            for item in archive.infolist():
+                destination = (assets / item.filename).resolve()
+                if not destination.is_relative_to(assets.resolve()):
+                    raise RuntimeError('Invalid test fixture path')
+            archive.extractall(assets)
+    run([tools / ('aapt2' + SUFFIX), 'compile', '--dir', ROOT / 'res', '-o', out / 'resources.zip'])
+    run([tools / ('aapt2' + SUFFIX), 'link', '-o', out / 'unsigned.apk', '--manifest', ROOT / 'AndroidManifest.xml',
+         '-I', platform, out / 'resources.zip', '-A', assets, '--java', out / 'generated',
+         '--min-sdk-version', '21', '--target-sdk-version', '35'])
+    classes = out / 'classes'
+    classes.mkdir()
+    sources = []
+    source_roots = [ROOT / 'src'] + ([ROOT / 'tests'] if TEST else [])
+    for source_root in source_roots:
+        for source in sorted(source_root.rglob('*.java')):
+            content = source.read_text(encoding='utf-8')
+            if not TEST and source.name == 'MainActivity.java':
+                content = content.replace('if(getIntent().getBooleanExtra("selftest",false))runSelfTest();', '')
+                start = content.index('    void runSelfTest()')
+                end = content.index('\n}', start)
+                content = content[:start] + content[end:]
+            target = out / 'sources' / source.relative_to(source_root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding='utf-8')
+            sources.append(target)
+    sources += sorted((out / 'generated').rglob('*.java'))
+    argfile = out / 'javac.args'
+    argfile.write_text('\n'.join('"' + str(p).replace('\\', '/') + '"' for p in sources), encoding='utf-8')
+    run([java / ('bin/javac' + SUFFIX), '-encoding', 'UTF-8', '-source', '8', '-target', '8',
+         '-classpath', platform, '-d', classes, '@' + str(argfile)])
+    with zipfile.ZipFile(out / 'classes.jar', 'w') as archive:
+        for path in sorted(classes.rglob('*.class')):
+            archive.write(path, path.relative_to(classes).as_posix())
+    run([java / ('bin/java' + SUFFIX), '-cp', tools / 'lib/d8.jar', 'com.android.tools.r8.D8',
+         '--release', '--min-api', '21', '--lib', platform, '--output', out, out / 'classes.jar'])
+    with zipfile.ZipFile(out / 'unsigned.apk', 'a') as archive:
+        archive.write(out / 'classes.dex', 'classes.dex')
+    run([tools / ('zipalign' + SUFFIX), '-f', '4', out / 'unsigned.apk', out / 'aligned.apk'])
+    signing = Path.home() / '.ai-image-tools/signing'
+    key = Path(os.environ.get('AIPT_KEYSTORE', str(signing / 'release.jks'))).expanduser().resolve()
+    password_file = Path(os.environ.get('AIPT_KEYSTORE_PASS_FILE', str(key.parent / 'password.txt'))).expanduser().resolve()
+    if key.is_relative_to(REPO) or password_file.is_relative_to(REPO):
+        raise RuntimeError('Keep the signing key and password outside the repository')
+    if not key.exists():
+        if password_file.exists():
+            raise RuntimeError('Password exists but signing key is missing; check paths before creating a new key')
+        key.parent.mkdir(parents=True, exist_ok=True)
+        password_file.parent.mkdir(parents=True, exist_ok=True)
+        password_file.write_text(secrets.token_hex(24), encoding='ascii')
+        run([java / ('bin/keytool' + SUFFIX), '-genkeypair', '-keystore', key,
+             '-storepass:file', password_file, '-keypass:file', password_file,
+             '-alias', 'guangyingruoshui', '-keyalg', 'RSA', '-keysize', '3072', '-validity', '10000',
+             '-dname', 'CN=Guangyingruoshui,OU=Image Tools,O=Independent,L=Local,ST=Local,C=CN'])
+    if not password_file.is_file():
+        raise RuntimeError('Signing password file not found')
+    apk = base / 'test.apk' if TEST else REPO / 'releases/Android/AI-Image-Editing-Tools.apk'
+    apk.parent.mkdir(parents=True, exist_ok=True)
+    run([java / ('bin/java' + SUFFIX), '-jar', tools / 'lib/apksigner.jar', 'sign', '--ks', key,
+         '--ks-key-alias', 'guangyingruoshui', '--ks-pass', 'file:' + str(password_file),
+         '--v1-signing-enabled', 'true', '--v2-signing-enabled', 'true', '--v4-signing-enabled', 'false',
+         '--out', out / 'signed.apk', out / 'aligned.apk'])
+    run([java / ('bin/java' + SUFFIX), '-jar', tools / 'lib/apksigner.jar', 'verify', '--verbose', out / 'signed.apk'])
+    run([tools / ('aapt2' + SUFFIX), 'dump', 'badging', out / 'signed.apk'])
+    shutil.copyfile(out / 'signed.apk', apk)
+    print('APK:', apk, 'bytes:', apk.stat().st_size, 'SHA256:', hashlib.sha256(apk.read_bytes()).hexdigest())
+
+
+if __name__ == '__main__':
+    main()
