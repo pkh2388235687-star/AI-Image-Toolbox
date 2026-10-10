@@ -43,7 +43,7 @@ if apk.exists():
         if assets != {'assets/NOTICE.md'}:
             errors.append('Unexpected release assets: ' + repr(assets))
         notice = archive.read('assets/NOTICE.md').decode('utf-8')
-        if 'MIT License' not in notice or 'BSD 2-Clause License' not in notice:
+        if 'MIT License' not in notice or 'BSD 2-Clause License' not in notice or 'Apache License' not in notice:
             errors.append('Missing embedded licenses')
 for required in ['LICENSE', 'README.md', 'README.en.md', 'THIRD_PARTY_NOTICES.md', '.gitignore', '.gitattributes']:
     if not (ROOT / required).is_file():

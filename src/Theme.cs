@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -77,6 +77,12 @@ namespace QQImageSwitch
                 if(child is TableLayoutPanel||child is FlowLayoutPanel)RefreshBackgrounds(child);
             }
         }
+    }
+    // Buffer the tool subtree together, including native child controls. The OS
+    // owns presentation; this works without a particular GPU or vendor driver.
+    class ToolPageHost : SoftPanel
+    {
+        protected override CreateParams CreateParams {get{var p=base.CreateParams;p.ExStyle|=0x02000000;return p;}}
     }
     class SoftTable : TableLayoutPanel
     {
@@ -200,11 +206,68 @@ namespace QQImageSwitch
         protected override void OnVisibleChanged(EventArgs e){base.OnVisibleChanged(e);if(Visible){PerformLayout();ReflowParent();}}
     }
     class SoftFlow : FlowLayoutPanel {public SoftFlow(){DoubleBuffered=true;}}
+    class SoftNumber : NumericUpDown
+    {
+        int wheelDelta;
+        void AdjustWheel(int delta)
+        {
+            if(!Enabled)return;
+            wheelDelta+=delta;
+            while(wheelDelta>=120){wheelDelta-=120;Value=Increment>=Maximum-Value?Maximum:Value+Increment;}
+            while(wheelDelta<=-120){wheelDelta+=120;Value=Increment>=Value-Minimum?Minimum:Value-Increment;}
+        }
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            var handled=e as HandledMouseEventArgs;if(handled!=null)handled.Handled=true;AdjustWheel(e.Delta);
+        }
+        protected override void WndProc(ref Message message)
+        {
+            if(message.Msg==0x20a){AdjustWheel((short)((long)message.WParam>>16));message.Result=IntPtr.Zero;return;}
+            base.WndProc(ref message);
+        }
+    }
+    static class QueueWheel
+    {
+        // A native list consumes the wheel even when there is nothing left to scroll.
+        // Forward only at a boundary, retaining native scrolling inside the queue.
+        public static bool Forward(Control source,ref Message message,bool canScroll)
+        {
+            if(message.Msg!=0x20a||canScroll||((long)message.WParam&12)!=0)return false;
+            int delta=(short)((long)message.WParam>>16);if(delta==0)return false;
+            for(Control parent=source.Parent;parent!=null;parent=parent.Parent)
+            {
+                var scroll=parent as ScrollableControl;
+                if(scroll==null||!scroll.AutoScroll||!scroll.VerticalScroll.Visible)continue;
+                var bar=scroll.VerticalScroll;
+                int maximum=Math.Max(bar.Minimum,bar.Maximum-bar.LargeChange+1);
+                if(delta>0?bar.Value<=bar.Minimum:bar.Value>=maximum)continue;
+                message.Result=SendMessage(scroll.Handle,message.Msg,message.WParam,message.LParam);return true;
+            }
+            return false;
+        }
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr handle,int message,IntPtr wparam,IntPtr lparam);
+    }
     class SoftGrid : DataGridView
     {
         readonly System.Collections.Generic.Dictionary<DataGridViewColumn,string> captions=new System.Collections.Generic.Dictionary<DataGridViewColumn,string>();
         public SoftGrid(){DoubleBuffered=true;ColumnAdded+=delegate(object sender,DataGridViewColumnEventArgs e){captions[e.Column]=e.Column.HeaderText;e.Column.HeaderText=L.T(e.Column.HeaderText);};ColumnRemoved+=delegate(object sender,DataGridViewColumnEventArgs e){captions.Remove(e.Column);};CellFormatting+=delegate(object sender,DataGridViewCellFormattingEventArgs e){if(e.Value is string&&(Columns[e.ColumnIndex].Name=="state"||Columns[e.ColumnIndex].Name=="cover")){e.Value=L.T((string)e.Value);}};L.Changed+=LanguageChanged;}
         void LanguageChanged(){foreach(var p in captions)p.Key.HeaderText=L.T(p.Value);Invalidate();}
+        protected override void WndProc(ref Message message)
+        {
+            if(message.Msg==0x20a)
+            {
+                int delta=(short)((long)message.WParam>>16);bool canScroll=false;
+                foreach(Control child in Controls)
+                {
+                    var bar=child as VScrollBar;if(bar==null||!bar.Visible)continue;
+                    int maximum=Math.Max(bar.Minimum,bar.Maximum-bar.LargeChange+1);
+                    canScroll=delta>0?bar.Value>bar.Minimum:bar.Value<maximum;break;
+                }
+                if(QueueWheel.Forward(this,ref message,canScroll))return;
+            }
+            base.WndProc(ref message);
+        }
         protected override void Dispose(bool disposing){if(disposing)L.Changed-=LanguageChanged;base.Dispose(disposing);}
     }
     class SoftButton : Button
@@ -245,6 +308,7 @@ namespace QQImageSwitch
                 using(var pen=new Pen(primary?Color.White:Color.FromArgb(153,136,192),Math.Max(1.6f,unit*.095f)){StartCap=LineCap.Round,EndCap=LineCap.Round,LineJoin=LineJoin.Round})using(var fill=new SolidBrush(primary?Color.White:Color.FromArgb(153,136,192)))
                 {
                     if(NavigationIcon==0){g.DrawRectangle(pen,x+3,y,unit-3,unit-3);g.DrawRectangle(pen,x,y+4,unit-3,unit-3);}
+                    else if(NavigationIcon==9){g.DrawEllipse(pen,x,y,unit,unit);g.FillPie(fill,x,y,unit,unit,90,180);}
                     else if(NavigationIcon==8){for(int row=0;row<3;row++)for(int col=0;col<3;col++)g.FillRectangle(fill,x+col*unit*.35f,y+row*unit*.35f,unit*.23f,unit*.23f);}
                     else if(NavigationIcon==1)g.FillPolygon(fill,new[]{new PointF(x+2,y),new PointF(x+unit,y+unit/2),new PointF(x+2,y+unit)});
                     else if(NavigationIcon==2)
@@ -260,6 +324,7 @@ namespace QQImageSwitch
                         g.DrawLines(pen,new[]{new PointF(x+unit*.31f,y+unit*.10f),new PointF(x+unit*.09f,y+unit*.32f),new PointF(x+unit*.31f,y+unit*.54f)});
                     }
                     else if(NavigationIcon==3){g.DrawLine(pen,x+3,y,x+unit,y+unit);g.DrawLine(pen,x,y+unit,x+unit,y);g.DrawEllipse(pen,x,y,unit,unit);}
+                    else if(NavigationIcon==10){foreach(var r in new[]{new RectangleF(x,y,unit*.4f,unit*.4f),new RectangleF(x+unit*.6f,y,unit*.4f,unit*.4f),new RectangleF(x,y+unit*.6f,unit*.4f,unit*.4f)}){g.DrawRectangle(pen,r.X,r.Y,r.Width,r.Height);g.FillRectangle(fill,r.X+r.Width*.3f,r.Y+r.Height*.3f,r.Width*.4f,r.Height*.4f);}g.FillRectangle(fill,x+unit*.6f,y+unit*.6f,unit*.18f,unit*.18f);g.FillRectangle(fill,x+unit*.82f,y+unit*.82f,unit*.18f,unit*.18f);}
                     else if(NavigationIcon==4){for(int row=0;row<2;row++)for(int col=0;col<2;col++)g.FillRectangle(fill,x+col*unit*.58f,y+row*unit*.58f,unit*.38f,unit*.38f);}
                     else if(NavigationIcon==5){g.DrawRectangle(pen,x,y,unit,unit);for(int row=0;row<3;row++)g.DrawLine(pen,x+3,y+3+row*unit*.25f,x+unit-3,y+3+row*unit*.25f);}
                     else if(NavigationIcon==7){g.DrawRectangle(pen,x,y,unit,unit);g.DrawLine(pen,x,y+unit,x+unit*.5f,y+unit*.45f);g.DrawLine(pen,x+unit*.5f,y+unit*.45f,x+unit,y+unit);g.FillEllipse(fill,x+unit*.64f,y+unit*.16f,unit*.18f,unit*.18f);}
@@ -285,8 +350,10 @@ namespace QQImageSwitch
         }
         public override string Text {get{return input==null?base.Text:input.Text;}set{if(input==null)base.Text=value;else input.Text=value;}}
         public int MaxLength {get{return input.MaxLength;}set{input.MaxLength=value;}}
+        public bool Multiline {get{return input.Multiline;}set{input.Multiline=value;input.WordWrap=value;input.AcceptsReturn=false;input.ScrollBars=value?ScrollBars.Vertical:ScrollBars.None;if(value){Height=88;MinimumSize=new Size(100,88);}PerformLayout();}}
+        public void FocusText(){input.Focus();input.SelectionStart=0;input.SelectionLength=0;input.ScrollToCaret();}
         protected override void OnLayout(LayoutEventArgs e)
-        {base.OnLayout(e);if(input!=null){int pad=Math.Max(12,Font.Height/2);input.SetBounds(pad,Math.Max(4,(Height-input.PreferredHeight)/2),Math.Max(1,Width-pad*2),input.PreferredHeight);}}
+        {base.OnLayout(e);if(input!=null){int pad=Math.Max(12,Font.Height/2);input.SetBounds(pad,input.Multiline?10:Math.Max(4,(Height-input.PreferredHeight)/2),Math.Max(1,Width-pad*2),input.Multiline?Math.Max(24,Height-20):input.PreferredHeight);}}
         protected override void OnFontChanged(EventArgs e){base.OnFontChanged(e);if(input!=null){input.Font=Font;PerformLayout();}}
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -328,7 +395,7 @@ namespace QQImageSwitch
             for(int i=0;i<Items.Count;i++)
             {
                 int index=i;var item=new ToolStripMenuItem(L.T(Items[i].ToString())){Checked=i==selected,Padding=new Padding(8,5,8,5)};
-                item.Click+=delegate{SelectedIndex=index;};menu.Items.Add(item);
+                item.Click+=delegate{menu.Close(ToolStripDropDownCloseReason.ItemClicked);Focus();SelectedIndex=index;};menu.Items.Add(item);
             }
             menu.Show(this,new Point(0,Height-1));
         }
@@ -346,7 +413,8 @@ namespace QQImageSwitch
             scrollingMenu.Items[0].Size=choices.Size;scrollingMenu.Size=new Size(choices.Width+8,choices.Height+8);
             scrollingMenu.Show(this,new Point(0,Height-1));choices.Focus();
         }
-        void CommitScrollingChoice(){if(choices.SelectedIndex<0)return;SelectedIndex=choices.SelectedIndex;scrollingMenu.Close(ToolStripDropDownCloseReason.ItemClicked);Focus();}
+        void CommitScrollingChoice(){if(choices.SelectedIndex<0)return;int index=choices.SelectedIndex;scrollingMenu.Close(ToolStripDropDownCloseReason.ItemClicked);Focus();SelectedIndex=index;}
+        internal bool PopupVisible {get{return menu!=null&&menu.Visible||scrollingMenu!=null&&scrollingMenu.Visible;}}
         internal void TestChoice(int index)
         {ShowChoices();Application.DoEvents();if(VisibleRows>0){choices.SelectedIndex=index;CommitScrollingChoice();}else{((ToolStripMenuItem)menu.Items[index]).PerformClick();menu.Close(ToolStripDropDownCloseReason.ItemClicked);}Application.DoEvents();if(selected!=index)throw new Exception("Dropdown choice did not apply");}
         protected override void Dispose(bool disposing){if(disposing){if(menu!=null){menu.Dispose();menu=null;}if(scrollingMenu!=null){scrollingMenu.Dispose();scrollingMenu=null;}}base.Dispose(disposing);}
@@ -356,7 +424,7 @@ namespace QQImageSwitch
             base.OnPaint(e);var g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;
             using(var path=SoftTheme.Round(new RectangleF(1,1,Math.Max(1,Width-3),Math.Max(1,Height-3)),12))using(var fill=new SolidBrush(Color.FromArgb(253,252,255)))using(var pen=new Pen(Color.FromArgb(226,221,240)))
             {g.FillPath(fill,path);g.DrawPath(pen,path);}
-            TextRenderer.DrawText(g,L.T(Text),Font,new Rectangle(12,0,Math.Max(1,Width-38),Height),Ui.Ink,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPrefix|TextFormatFlags.SingleLine);
+            TextRenderer.DrawText(g,(Tag as string)=="raw"?Text:L.T(Text),Font,new Rectangle(12,0,Math.Max(1,Width-38),Height),Ui.Ink,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPrefix|TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis);
             using(var pen=new Pen(Ui.Muted,1.5f)){int x=Width-18,y=Height/2;g.DrawLines(pen,new[]{new Point(x-4,y-2),new Point(x,y+2),new Point(x+4,y-2)});}
         }
     }
@@ -379,6 +447,17 @@ namespace QQImageSwitch
     {
         public SoftList(){DrawMode=DrawMode.OwnerDrawFixed;ItemHeight=Font.Height+8;}
         protected override void OnFontChanged(EventArgs e){base.OnFontChanged(e);ItemHeight=Font.Height+8;}
+        protected override void WndProc(ref Message message)
+        {
+            if(message.Msg==0x20a)
+            {
+                int delta=(short)((long)message.WParam>>16);
+                int visible=Math.Max(1,ClientSize.Height/Math.Max(1,ItemHeight));
+                bool canScroll=Items.Count>visible&&(delta>0?TopIndex>0:TopIndex<Items.Count-visible);
+                if(QueueWheel.Forward(this,ref message,canScroll))return;
+            }
+            base.WndProc(ref message);
+        }
         protected override void OnDrawItem(DrawItemEventArgs e)
         {
             if(e.Index<0)return;bool selected=(e.State&DrawItemState.Selected)!=0;e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;

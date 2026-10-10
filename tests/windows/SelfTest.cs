@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
@@ -40,7 +40,10 @@ namespace QQImageSwitch
         }
         public static void Run(string dir)
         {
-            Directory.CreateDirectory(dir);
+            QueueWheelTests.Run();
+            Directory.CreateDirectory(dir);QrTests.Run(dir);
+            BackgroundRevealTests.Run(dir);
+            DualBlendTests.Run(dir);
             using(var c=Art(240,160,false))
             using(var r=Art(240,160,true))
             {

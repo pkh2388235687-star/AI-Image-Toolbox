@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -42,8 +42,17 @@ namespace QQImageSwitch
                     }
                 }
                 catch (ArgumentException) { }
-                return ((Bitmap)img).Clone(new Rectangle(0,0,img.Width,img.Height),PixelFormat.Format32bppArgb);
+                return Detach((Bitmap)img);
             }
+        }
+        // A GDI+ Clone can retain an indexed pixel format and source-file lifetime.
+        // Copy converted rows into an independent editable ARGB bitmap instead.
+        public static Bitmap Detach(Bitmap image)
+        {
+            var result=new Bitmap(image.Width,image.Height,PixelFormat.Format32bppArgb);
+            var bounds=new Rectangle(0,0,image.Width,image.Height);BitmapData source=null,destination=null;bool success=false;
+            try{source=image.LockBits(bounds,ImageLockMode.ReadOnly,PixelFormat.Format32bppArgb);destination=result.LockBits(bounds,ImageLockMode.WriteOnly,PixelFormat.Format32bppArgb);byte[] row=new byte[checked(image.Width*4)];for(int y=0;y<image.Height;y++){Marshal.Copy(IntPtr.Add(source.Scan0,y*source.Stride),row,0,row.Length);Marshal.Copy(row,0,IntPtr.Add(destination.Scan0,y*destination.Stride),row.Length);}success=true;return result;}
+            finally{if(source!=null)image.UnlockBits(source);if(destination!=null)result.UnlockBits(destination);if(!success)result.Dispose();}
         }
         public static Size OutputSize(Image real, int maxSide)
         {
@@ -253,7 +262,7 @@ namespace QQImageSwitch
         {
             using(var s=new MemoryStream(png))
             using(var img=(Bitmap)Image.FromStream(s))
-                return img.Clone(new Rectangle(0,0,img.Width,img.Height),PixelFormat.Format32bppArgb);
+                return Detach(img);
         }
         public static void SaveAtomic(string path,byte[] bytes)
         {
@@ -274,7 +283,7 @@ namespace QQImageSwitch
             byte[] length=U32((uint)data.Length),content=Join(Encoding.ASCII.GetBytes(type),data),crc=U32(Crc(content,0,content.Length));
             s.Write(length,0,4);s.Write(content,0,content.Length);s.Write(crc,0,4);
         }
-        static uint Crc(byte[] data,int offset,int n)
+        internal static uint Crc(byte[] data,int offset,int n)
         { uint c=0xffffffff;for(int i=offset;i<offset+n;i++)c=CrcTable[(c^data[i])&255]^(c>>8);return c^0xffffffff; }
         static uint[] MakeCrcTable()
         {var t=new uint[256];for(uint n=0;n<256;n++){uint c=n;for(int k=0;k<8;k++)c=(c&1)!=0?0xedb88320^(c>>1):c>>1;t[n]=c;}return t;}

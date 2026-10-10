@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text;
 
@@ -42,7 +42,7 @@ namespace QQImageSwitch
             if(feature=="还原")feature="双图切换"; // Keep older callers on the merged page's destination.
             string root=Normalize(folder);
             if(root.Length==0)throw new ArgumentException("请先选择保存位置。");
-            if(feature!="双图切换"&&feature!="图片混淆"&&feature!="合成GIF"&&feature!="清信息"&&feature!="打码"&&feature!="tag读取"&&feature!="文件伪装")throw new ArgumentException("未知功能文件夹。");
+            if(feature!="双图切换"&&feature!="背景显图"&&feature!="图片混淆"&&feature!="合成GIF"&&feature!="清信息"&&feature!="打码"&&feature!="tag读取"&&feature!="文件伪装"&&feature!="二维码制作")throw new ArgumentException("未知功能文件夹。");
             return Path.Combine(root,feature);
         }
         public static string FunctionFolder(string folder,string feature)

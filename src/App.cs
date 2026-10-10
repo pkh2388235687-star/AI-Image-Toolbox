@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -11,11 +11,13 @@ namespace QQImageSwitch
 {
     static class Program
     {
+        static Program(){QrDependencies.Register();}
         [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetProcessDPIAware();
         [STAThread] static int Main(string[] args)
         {
             try
             {
+                if(args.Length>0&&args[0].StartsWith("--prototype-")){try{PackagingPrototype.Command(args);return 0;}catch(Exception ex){Console.Error.WriteLine(ex.Message);return 1;}}
 #if SELF_TEST
                 if(args.Length>0&&args[0]=="--scramble-test"){ObfuscationTests.Run(args[1]);return 0;}
 #endif
@@ -86,14 +88,14 @@ namespace QQImageSwitch
                         // Use the same message loop as the app so async export continuations stay on the UI thread.
                         f.Shown+=async delegate
                         {
-                            try{f.ChooseLanguage(false);f.CheckPairingBehavior();f.CheckNavigationBehavior();f.CheckTextBehavior();await f.CheckInspectionBehavior(args[1]+".export");await f.CheckEditorBehavior();await f.CheckFileBehavior(args[1]+".files");await f.CheckObfuscationBehavior(args[1]+".scramble");await f.CheckMergedRestore(args[1]+".merged");f.CheckButtonHints();f.CheckLanguageBehavior(args[1]+".language.txt");}
+                            try{f.ChooseLanguage(false);f.CheckPairingBehavior();f.CheckNavigationBehavior();f.CheckTextBehavior();await f.CheckInspectionBehavior(args[1]+".export");await f.CheckEditorBehavior();await f.CheckFileBehavior(args[1]+".files");await f.CheckObfuscationBehavior(args[1]+".scramble");await f.CheckMergedRestore(args[1]+".merged");await f.CheckDualPage(args[1]+".dual");await f.CheckBackgroundBehavior(args[1]+".background");await f.CheckQrBehavior(args[1]+".qr");f.CheckButtonHints();f.CheckLanguageBehavior(args[1]+".language.txt");}
                             catch(Exception ex){uiError=ex;}
                             finally{f.Close();}
                         };
                         Application.Run(f);
                         Application.ThreadException-=handler;if(uiError!=null)throw new Exception("Unhandled UI exception",uiError);
                     }
-                    File.WriteAllText(args[1],"PASS: cover pairing and queue operations, eight independent pages, embedded double PNG restore, image scramble immediately below double PNG, custom JPEG percentage and actual preview size, batch scrambling and original-file SHA-256 restore, queue persists, active navigation highlighting, shared folder, equal-height parallel cards, nine text presets and free drag, three-row scrolling position dropdown, repeated dropdown open/select/close, per-field parameter copy buttons, separate WebUI/ComfyUI TXT files in tag读取 without overwrite, unloaded and empty WebUI panels skipped, wheel zoom at pointer, middle mouse pan, live brush width and strength preview without modifying pixels, rectangle/mosaic-brush gestures and apply/undo/reset, independent file card states, async file generation and hash-checked restore, no unhandled UI exceptions.");return 0;
+                    File.WriteAllText(args[1],"PASS: cover pairing and queue operations, ten independent pages, embedded double PNG restore, background reveal immediately below double PNG, custom JPEG percentage and actual preview size, batch scrambling and original-file SHA-256 restore, queue persists, active navigation highlighting, shared folder, equal-height parallel cards, nine text presets and free drag, three-row scrolling position dropdown, repeated dropdown open/select/close, per-field parameter copy buttons, separate WebUI/ComfyUI TXT files in tag读取 without overwrite, unloaded and empty WebUI panels skipped, wheel zoom at pointer, middle mouse pan, live brush width and strength preview without modifying pixels, rectangle/mosaic-brush gestures and apply/undo/reset, independent file card states, QR generation/import scan/overlay/multiple text layers and background linkage, 50-step undo/redo, async file generation and hash-checked restore, no unhandled UI exceptions.");return 0;
                 }
                 if(args.Length>0 && args[0]=="--render-ui")
                 {
@@ -157,7 +159,7 @@ namespace QQImageSwitch
         public string EmptyText="点击选择图片\n或把文件拖到这里";
         public bool Checker=true;
         public ImageCanvas(){DoubleBuffered=true;BackColor=Color.FromArgb(248,246,253);Cursor=Cursors.Hand;TabStop=true;Zoom=1;settle.Tick+=delegate{settle.Stop();interacting=false;ClearDisplay();Invalidate();};}
-        void Interact(){interacting=true;settle.Stop();settle.Start();}
+        protected void Interact(){interacting=true;settle.Stop();settle.Start();}
         public static int ViewportHeight(Control viewport,double fraction,int minimum,int maximum)
         {
             float scale=Math.Max(.5f,viewport.Font.Size/10f);

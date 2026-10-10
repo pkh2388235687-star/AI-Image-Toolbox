@@ -38,6 +38,7 @@ namespace QQImageSwitch
         public static FlowLayoutPanel Flow(params Control[] controls)
         {
             var f=new SoftFlow {AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,Dock=DockStyle.Top,WrapContents=true,BackColor=Color.Transparent,Margin=new Padding(0)};
+            foreach(var control in controls){control.Anchor=AnchorStyles.Left;control.Margin=new Padding(control.Margin.Left,0,control.Margin.Right,10);var label=control as Label;if(label!=null)label.TextAlign=ContentAlignment.MiddleLeft;}
             f.Controls.AddRange(controls);return f;
         }
         public static TableLayoutPanel Column(Padding padding)
@@ -91,7 +92,10 @@ namespace QQImageSwitch
         Label coverName,realName,queueTitle,status;
         CheckBox numbered;
         SoftCombo resolution;
-        SoftInput coverText;
+        Label dualDescription,coverHeading,realHeading;
+        SoftInput coverText;TextLayerSelector textLayers;bool loadingTextLayer;
+        CoverTextOptions ActiveText {get{return textLayers==null?preferences.CoverText:textLayers.Active;}}
+        void LoadTextLayer(CoverTextOptions t){loadingTextLayer=true;try{coverText.Text=t.Text;textPosition.SelectedIndex=Array.IndexOf(PositionIds,t.Position);textSize.Value=t.SizePercent;textX.Value=t.X;textY.Value=t.Y;}finally{loadingTextLayer=false;}ConfigureTextPlacement();}
         SoftCombo textPosition;
         NumericUpDown textSize,textX,textY;
         bool placingText;
@@ -124,7 +128,7 @@ namespace QQImageSwitch
 
             var header=Ui.Column(new Padding(0,0,0,6));
             Ui.Add(header,Ui.Text("双图切换",21,true));
-            Ui.Add(header,Ui.Text("将封面与原图合成一个 PNG；每张图可单独换封面，也可共用封面并编号。",11));Ui.Add(content,header);
+            dualDescription=Ui.Text("将封面与原图合成一个 PNG；每张图可单独换封面，也可共用封面并编号。",11);Ui.Add(header,dualDescription);Ui.Add(content,header);
             cards=new TableLayoutPanel {ColumnCount=2,RowCount=1,AutoSize=false,Height=480,Dock=DockStyle.Top,Margin=new Padding(0,0,0,12)};
             cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));cards.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             cards.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -139,7 +143,8 @@ namespace QQImageSwitch
             textSize=FileToolPage.Number(2,18,preferences.CoverText.SizePercent);textSize.Width=80;
             textX=FileToolPage.Number(0,100,preferences.CoverText.X);textY=FileToolPage.Number(0,100,preferences.CoverText.Y);textX.Width=80;textY.Width=80;
             Ui.Add(settings,Ui.Flow(Ui.Text("自由位置：横向 %"),textX,Ui.Text("纵向 %"),textY,Ui.Text("选「自由拖动」后，可直接在封面上拖动文字。",9)));
-            Ui.Add(settings,Ui.Flow(Ui.Text("字号（占短边 %）"),textSize,Ui.Button("文字颜色…",delegate{using(var d=new ColorDialog {Color=preferences.CoverText.Color,FullOpen=true})if(L.Show(d,this)==DialogResult.OK){preferences.CoverText.Color=d.Color;UpdateCoverText();}}),Ui.Button("清空文字",delegate{coverText.Text="";UpdateCoverText();})));
+            textLayers=new TextLayerSelector(()=>preferences.CoverText,LoadTextLayer,delegate{RefreshCover();RememberPreferences();},UpdateCoverText);Ui.Add(settings,textLayers);
+            Ui.Add(settings,Ui.Flow(Ui.Text("字号（占短边 %）"),textSize,Ui.Button("文字颜色…",delegate{using(var d=new ColorDialog {Color=ActiveText.Color,FullOpen=true})if(L.Show(d,this)==DialogResult.OK){ActiveText.Color=d.Color;UpdateCoverText();}}),Ui.Button("清空文字",delegate{coverText.Text="";UpdateCoverText();})));
             Ui.Add(settings,Ui.Text("留空不添加。文字应用到全部配对封面，原图保持不变；预设底部位置自动避开序号。",9));
             numbered=new SoftCheck {Text="封面右下角自动编号（①、②、③…）",Checked=preferences.Numbered,AutoSize=true,Margin=new Padding(0,0,20,10)};
             resolution=new SoftCombo {DropDownStyle=ComboBoxStyle.DropDownList,Width=210,Margin=new Padding(0,0,0,10)};
@@ -189,7 +194,7 @@ namespace QQImageSwitch
             queue.SelectionChanged+=delegate{if(!refreshing&&!busy)ShowSelected();};
             numbered.CheckedChanged+=delegate{RefreshCover();RememberPreferences();};resolution.SelectedIndexChanged+=delegate{RememberPreferences();};
             textDebounce=new System.Windows.Forms.Timer {Interval=300};textDebounce.Tick+=delegate{textDebounce.Stop();UpdateCoverText();};
-            coverText.TextChanged+=delegate{textDebounce.Stop();textDebounce.Start();};textPosition.SelectedIndexChanged+=delegate{UpdateCoverText();if(textPosition.SelectedIndex==0){CaptureScroll(false);status.Text="可直接在左侧封面上拖到任意位置；文字中心使用横向、纵向百分比定位。";}};textSize.ValueChanged+=delegate{UpdateCoverText();};
+            coverText.TextChanged+=delegate{textLayers.RefreshNames(coverText.Text);textDebounce.Stop();textDebounce.Start();};textPosition.SelectedIndexChanged+=delegate{UpdateCoverText();if(textPosition.SelectedIndex==0){CaptureScroll(false);status.Text="可直接在左侧封面上拖到任意位置；文字中心使用横向、纵向百分比定位。";}};textSize.ValueChanged+=delegate{UpdateCoverText();};
             textX.ValueChanged+=delegate{if(!placingText)UpdateCoverText();};textY.ValueChanged+=delegate{if(!placingText)UpdateCoverText();};
             EnableDrop(queue,async paths=>await ImportPaths(paths));
             scroll.ClientSizeChanged+=delegate{Relayout();};Shown+=delegate{FitScreen();Relayout();};
@@ -198,7 +203,7 @@ namespace QQImageSwitch
             restorePlaceholder=Ui.Column(new Padding(18,16,18,12));restorePlaceholder.BackColor=Color.White;restorePlaceholder.Margin=new Padding(0,0,0,16);
             Ui.Add(restorePlaceholder,Ui.Text("还原双图 PNG",16,true));Ui.Add(restorePlaceholder,Ui.Text("导入双图 PNG，查看聊天封面与隐藏原图，批量导出还原结果。",10));
             Ui.Add(restorePlaceholder,Ui.Flow(Ui.Button("批量导入双图 PNG…",async delegate{EnsureMergedRestore();await mergedRestore.Pick();},true),Ui.Button("显示还原工作台",delegate{EnsureMergedRestore();})));Ui.Add(content,restorePlaceholder);
-            content.ResumeLayout(true);CreateNavigation();RefreshCover();ConfigureTextPlacement();UpdateActions();layoutReady=true;ResumeLayout(true);Relayout();HeightResize.Tree(this);
+            content.ResumeLayout(true);CreateNavigation();ConfigureTextPlacement();UpdateActions();layoutReady=true;ResumeLayout(true);Relayout();HeightResize.Tree(this);
             Action<int> resizePair=h=>{HeightResize.Set(coverView,h);HeightResize.Set(realView,h);Relayout();};
             HeightResize.Enable(coverView,resizePair);HeightResize.Enable(realView,resizePair);
             HeightResize.Enable(coverCard,h=>resizePair(h>0?Math.Max(120,coverView.Height+h-coverCard.Height):0));
@@ -215,17 +220,17 @@ namespace QQImageSwitch
         {
             disguisePage=new SoftPanel {Dock=DockStyle.Fill};var existing=Controls.Cast<Control>().ToArray();
             foreach(var control in existing){Controls.Remove(control);disguisePage.Controls.Add(control);}scroll.BringToFront();
-            pageHost=new SoftPanel {Dock=DockStyle.Fill};Controls.Add(pageHost);pageHost.Controls.Add(disguisePage);pages.Add(disguisePage);
-            for(int i=1;i<8;i++)pages.Add(null);
-            var navScroll=new SoftPanel {Dock=DockStyle.Left,Width=164,AutoScroll=true,BackColor=Color.White,Padding=new Padding(14,22,14,12)};Controls.Add(navScroll);pageHost.BringToFront();
+            pageHost=new ToolPageHost {Dock=DockStyle.Fill};Controls.Add(pageHost);pageHost.Controls.Add(disguisePage);pages.Add(disguisePage);
+            for(int i=1;i<10;i++)pages.Add(null);
+            var navScroll=new SoftScrollPanel {Dock=DockStyle.Left,Width=164,AutoScroll=true,BackColor=Color.White,Padding=new Padding(14,22,14,12)};Controls.Add(navScroll);pageHost.BringToFront();
             navigation=Ui.Column(new Padding(0));navScroll.Controls.Add(navigation);
             var navTitle=Ui.Text("工具集合",14,true);var navSubtitle=Ui.Text("图片小助手",9);navTitle.Tag=navSubtitle.Tag="singleline";Ui.Add(navigation,navTitle);Ui.Add(navigation,navSubtitle);
-            string[] names={"双图切换","合成 GIF","图片混淆","清信息","打码","tag读取","设置","文件伪装"};
+            string[] names={"双图切换","合成 GIF","图片混淆","清信息","打码","tag读取","设置","文件伪装","背景显图","二维码制作"};
             foreach(string name in names)navigationButtons.Add(null);
-            foreach(int i in new[]{0,2,7,1,3,4,5,6})
+            foreach(int i in new[]{0,8,2,7,1,3,4,5,9,6})
             {
                 int index=i;var button=Ui.Button(names[i],delegate{SwitchPage(index);});button.Dock=DockStyle.Top;button.Margin=new Padding(0,0,0,12);button.TextAlign=ContentAlignment.MiddleLeft;
-                ((SoftButton)button).NavigationIcon=i==2?8:i;button.Padding=new Padding(40,9,12,9);
+                ((SoftButton)button).NavigationIcon=i==9?10:i==8?9:i==2?8:i;button.Padding=new Padding(40,9,12,9);
                 navigationButtons[i]=button;Ui.Add(navigation,button);
             }
             bool sizingNavigation=false;
@@ -242,16 +247,16 @@ namespace QQImageSwitch
                         int inset=item is Button?item.Padding.Horizontal:8;
                         needed=Math.Max(needed,textWidth+inset+item.Margin.Horizontal+8);
                     }
-                    int outer=needed+navScroll.Padding.Horizontal+SystemInformation.VerticalScrollBarWidth;
+                    int outer=Math.Min(Math.Max(164,ClientSize.Width*2/5),needed+navScroll.Padding.Horizontal+SystemInformation.VerticalScrollBarWidth);
                     if(navScroll.Width!=outer)navScroll.Width=outer;
-                    int width=Math.Max(100,navScroll.ClientSize.Width-navScroll.Padding.Horizontal-(navScroll.VerticalScroll.Visible?SystemInformation.VerticalScrollBarWidth:0));
+                    int width=Math.Max(100,navScroll.ClientSize.Width-navScroll.Padding.Horizontal);
                     if(navigation.Width!=width)navigation.Width=width;
                 }
                 finally{sizingNavigation=false;}
             };
             navScroll.ClientSizeChanged+=delegate{sizeNavigation();};
             foreach(Control item in navigation.Controls){item.FontChanged+=delegate{sizeNavigation();};item.TextChanged+=delegate{sizeNavigation();};item.PaddingChanged+=delegate{sizeNavigation();};}
-            navigation.Width=136;sizeNavigation();SwitchPage(0);
+            ClientSizeChanged+=delegate{sizeNavigation();};navigation.Width=136;sizeNavigation();SwitchPage(0);
             Action languageLayout=delegate{sizeNavigation();coverKey=null;RefreshCover();Relayout();};L.Changed+=languageLayout;Disposed+=delegate{L.Changed-=languageLayout;};languageLayout();
         }
         void SetNavigationBusy(bool value)
@@ -265,7 +270,7 @@ namespace QQImageSwitch
         {
             if(pages[index]!=null)return;
             ToolPage page=index==2?(ToolPage)new ObfuscationPage(exportLocation,SetNavigationBusy):index<=3?(ToolPage)new FileToolPage(index,exportLocation,preferences,SetNavigationBusy):
-                index==4?(ToolPage)new RedactPage(exportLocation,SetNavigationBusy):index==5?(ToolPage)new InspectionPage(exportLocation,SetNavigationBusy):index==7?(ToolPage)new FileDisguisePage(exportLocation,SetNavigationBusy):new SettingsPage(exportLocation,preferences,ApplyPreferences,SetNavigationBusy);
+                index==4?(ToolPage)new RedactPage(exportLocation,SetNavigationBusy):index==5?(ToolPage)new InspectionPage(exportLocation,SetNavigationBusy):index==7?(ToolPage)new FileDisguisePage(exportLocation,SetNavigationBusy):index==8?(ToolPage)new BackgroundRevealPage(exportLocation,SetNavigationBusy):index==9?(ToolPage)new QrPage(exportLocation,SetNavigationBusy):new SettingsPage(exportLocation,preferences,ApplyPreferences,SetNavigationBusy);
             page.Visible=false;pages[index]=page;pageHost.Controls.Add(page);HeightResize.Tree(page);
         }
         void SaveActiveLocation(){if(activePage==0)RememberExportFolder(false);else ((ToolPage)pages[activePage]).OutputFolder.Remember();}
@@ -273,22 +278,22 @@ namespace QQImageSwitch
         {
             if(index<0||index>=pages.Count||busy||(mergedRestore!=null&&mergedRestore.Busy)||pages.OfType<ToolPage>().Any(p=>p.Busy))return;
             if(activePage==index&&pages[index]!=null&&pages[index].Visible)return;
-            bool frozen=IsHandleCreated&&Visible;if(frozen)SendMessage(Handle,0x000b,IntPtr.Zero,IntPtr.Zero);
+            
             pageHost.SuspendLayout();
             try
             {
                 EnsurePage(index);
-                SaveActiveLocation();if(activePage>0)((ToolPage)pages[activePage]).OnLeavePage();activePage=index;
+                pages[index].BringToFront();pages[index].Visible=true;SaveActiveLocation();if(activePage>0)((ToolPage)pages[activePage]).OnLeavePage();activePage=index;
                 for(int i=0;i<pages.Count;i++)
                 {
                     if(pages[i]!=null)pages[i].Visible=i==index;navigationButtons[i].BackColor=i==index?Ui.Purple:Color.White;
                     navigationButtons[i].ForeColor=i==index?Color.White:Ui.Ink;
                 }
-                pages[index].BringToFront();
+                pages[index].BringToFront();((ScrollableControl)navigation.Parent).ScrollControlIntoView(navigationButtons[index]);
                 if(index==0){exportFolder.Text=exportLocation.Load();ApplyPreferences();}
                 else ((ToolPage)pages[index]).OnEnterPage();
             }
-            finally{pageHost.ResumeLayout(true);if(frozen){SendMessage(Handle,0x000b,new IntPtr(1),IntPtr.Zero);Invalidate(true);}}
+            finally{pageHost.ResumeLayout(true);pageHost.Invalidate(false);}
         }
         [System.Runtime.InteropServices.DllImport("user32.dll")]static extern IntPtr SendMessage(IntPtr window,int message,IntPtr wparam,IntPtr lparam);
         void RememberPreferences()
@@ -298,10 +303,10 @@ namespace QQImageSwitch
         }
         void UpdateCoverText()
         {
-            textDebounce.Stop();preferences.CoverText.Text=coverText.Text.Length>200?coverText.Text.Substring(0,200):coverText.Text;
-            preferences.CoverText.Position=PositionIds[textPosition.SelectedIndex];preferences.CoverText.SizePercent=(int)textSize.Value;
-            preferences.CoverText.X=(int)textX.Value;preferences.CoverText.Y=(int)textY.Value;ConfigureTextPlacement();
-            RefreshCover();RememberPreferences();
+            if(loadingTextLayer)return;textDebounce.Stop();ActiveText.Text=coverText.Text.Length>200?coverText.Text.Substring(0,200):coverText.Text;
+            ActiveText.Position=PositionIds[textPosition.SelectedIndex];ActiveText.SizePercent=(int)textSize.Value;
+            ActiveText.X=(int)textX.Value;ActiveText.Y=(int)textY.Value;ConfigureTextPlacement();
+            textLayers.RefreshNames();RefreshCover();RememberPreferences();
         }
         void ConfigureTextPlacement()
         {
@@ -311,7 +316,7 @@ namespace QQImageSwitch
         void PlaceText(object sender,TextPositionEventArgs e)
         {
             placingText=true;try{textX.Value=e.X;textY.Value=e.Y;}finally{placingText=false;}
-            preferences.CoverText.X=e.X;preferences.CoverText.Y=e.Y;RefreshCover();
+            ActiveText.X=e.X;ActiveText.Y=e.Y;RefreshCover();
             textDebounce.Stop();if(e.Finished)RememberPreferences();else textDebounce.Start();
         }
         void ApplyPreferences()
@@ -326,7 +331,7 @@ namespace QQImageSwitch
             var card=Ui.Column(new Padding(16,14,16,10));card.BackColor=Color.White;card.Margin=original?new Padding(7,0,0,0):new Padding(0,0,7,0);
             card.AutoSize=false;
             card.Dock=DockStyle.Fill;
-            Ui.Add(card,Ui.Text(original?"02  当前原图":"01  当前配对封面",13,true));
+            var heading=Ui.Text(original?"02  当前原图":"01  当前配对封面",13,true);if(original)realHeading=heading;else coverHeading=heading;Ui.Add(card,heading);
             ImageCanvas canvas=original?new ImageCanvas():new CoverCanvas();
             canvas.Dock=DockStyle.Fill;canvas.Height=240;canvas.MinimumSize=new Size(0,240);canvas.Margin=new Padding(0,0,0,10);canvas.AllowDrop=true;
             canvas.EmptyText=
@@ -538,7 +543,7 @@ namespace QQImageSwitch
         void RefreshCover()
         {
             if(coverView==null)return;
-            if(frontPreview!=null){coverView.Image=null;frontPreview.Dispose();frontPreview=null;}
+            Bitmap previous=frontPreview;frontPreview=null;
             int index=SelectedIndex();
             try
             {
@@ -562,7 +567,7 @@ namespace QQImageSwitch
                 coverView.Image=frontPreview;coverName.Text=coverLabel+(index>=0?"  ·  配对第 "+(index+1)+" 张原图":"  ·  新导入图片的初始封面");
             }
             catch(Exception ex){coverView.Image=null;coverName.Text="封面无法读取："+ex.Message;}
-            coverView.Invalidate();
+            if(previous!=null)previous.Dispose();coverView.Invalidate();
         }
         void RemoveSelected()
         {
@@ -589,12 +594,12 @@ namespace QQImageSwitch
         int SelectedSize(){int[] values={1200,2048,3200,0};return values[resolution.SelectedIndex];}
         async Task<byte[]> BuildCurrent()
         {
-            int index=SelectedIndex();int size=SelectedSize();bool stamp=numbered.Checked;
+            int index=SelectedIndex();int size=SelectedSize();bool stamp=numbered.Checked;CancellationToken token=cancellation==null?CancellationToken.None:cancellation.Token;
             if(real==null)throw new InvalidOperationException("请先选择一张可读取的原图。");
             if(coverView.Image==null)throw new InvalidOperationException("当前封面无法读取，请重新设置封面。");
             UpdateCoverText();var text=preferences.CoverText.Copy();
             using(var r=(Bitmap)real.Clone())using(var c=cover==null?null:(Bitmap)cover.Clone())
-                return await Task.Run(()=>Batch.Build(c,r,size,index+1,stamp,preferences.PaddingColor,text));
+                return await Task.Run(()=>Batch.Build(c,r,size,index+1,stamp,preferences.PaddingColor,text,token));
         }
         async Task ShowPreview()
         {
@@ -713,7 +718,8 @@ namespace QQImageSwitch
         }
         public void ValidateLayout()
         {
-            if(activePage==0&&!stacked&&(coverCard.Height!=realCard.Height||coverView.Size!=realView.Size))throw new Exception("Parallel image cards or preview areas differ in size");
+            // A 50/50 layout can allocate one extra pixel to the second column.
+            if(activePage==0&&!stacked&&(coverCard.Height!=realCard.Height||coverView.Height!=realView.Height||Math.Abs(coverView.Width-realView.Width)>1))throw new Exception("Parallel image cards or preview areas differ in size");
             foreach(var c in Descendants(this).Where(c=>c.Visible&&(c is Button||c is Label)))
             {
                 Size preferred=c.GetPreferredSize(new Size(c.Width,0));
@@ -779,23 +785,25 @@ namespace QQImageSwitch
         }
         public Task CheckMergedRestore(string folder){SwitchPage(0);EnsureMergedRestore();folder=Path.GetFullPath(folder);exportFolder.Text=folder;RememberExportFolder(false);return mergedRestore.CheckMergedRestore(folder);}
         public Task CheckObfuscationBehavior(string folder){SwitchPage(2);return ((ObfuscationPage)pages[2]).CheckBehavior(folder);}
+        public Task CheckBackgroundBehavior(string folder){SwitchPage(8);return ((BackgroundRevealPage)pages[8]).CheckBehavior(folder);}
         public Task CheckEditorBehavior(){SwitchPage(4);return ((RedactPage)pages[4]).CheckEditingBehavior();}
         public Task CheckInspectionBehavior(string folder){SwitchPage(5);return ((InspectionPage)pages[5]).CheckExport(folder);}
+        public Task CheckQrBehavior(string folder){SwitchPage(9);return ((QrPage)pages[9]).CheckBehavior(folder);}
         public Task CheckFileBehavior(string folder){SwitchPage(7);return ((FileDisguisePage)pages[7]).CheckBehavior(folder);}
         internal void ChooseLanguage(bool english){EnsurePage(6);((SettingsPage)pages[6]).ChooseLanguage(english);}
         internal void CheckLanguageBehavior(string report)
         {
-            foreach(int index in new[]{0,2,7,1,3,4,5,6})DemoPage(index);
+            foreach(int index in new[]{0,8,2,7,1,3,4,5,9,6})DemoPage(index);
             string originalFolder=exportFolder.Text;var paths=items.Select(i=>i.Path).ToArray();string text=coverText.Text;string fileState=((FileDisguisePage)pages[7]).StateFingerprint();
             ChooseLanguage(true);Application.DoEvents();if(!L.English||new ToolPreferences(exportLocation.SettingsFile).Language!="en"||Text!="AI Image Editing Tools")throw new Exception("Language did not switch or persist");
             var untranslated=new List<string>();
-            foreach(int index in new[]{0,2,7,1,3,4,5,6})
+            foreach(int index in new[]{0,8,2,7,1,3,4,5,9,6})
             {
                 SwitchPage(index);Application.DoEvents();ValidateLayout();
                 foreach(Control c in ControlTree(pages[index]))
                 {
                     if((c is Label||c is Button||c is CheckBox||(c is TextBox&&((TextBox)c).ReadOnly&&(c.Tag as string)!="raw"))&&System.Text.RegularExpressions.Regex.IsMatch(c.Text,@"[\u4e00-\u9fff]"))untranslated.Add(index+": "+c.Text);
-                    var combo=c as SoftCombo;if(combo!=null)foreach(var item in combo.Items)if(item.ToString()!="简体中文")untranslated.AddRange(L.Untranslated(new[]{item.ToString()}).Select(s=>index+" combo: "+s));
+                    var combo=c as SoftCombo;if(combo!=null&&(combo.Tag as string)!="raw")foreach(var item in combo.Items)if(item.ToString()!="简体中文")untranslated.AddRange(L.Untranslated(new[]{item.ToString()}).Select(s=>index+" combo: "+s));
                 }
                 foreach(var b in ButtonTree(pages[index]))b.TestHint();
             }
@@ -805,12 +813,12 @@ namespace QQImageSwitch
             ChooseLanguage(false);Application.DoEvents();if(L.English||Text!="AI Image Editing Tools"||new ToolPreferences(exportLocation.SettingsFile).Language!="zh")throw new Exception("Switching back did not restore Chinese captions");
             foreach(var b in navigationButtons)if(b.Text!=L.Canonical(b.Text)||!System.Text.RegularExpressions.Regex.IsMatch(b.Text,@"[\u4e00-\u9fff]"))throw new Exception("Chinese navigation caption was lost");
             if(L.T("参数读取")!="参数读取")throw new Exception("Inactive translation modified text");
-            File.WriteAllText(report,"PASS: live Chinese/English switching across eight pages, saved language preference, navigation and full button hints, original filenames/paths/prompts/queue preserved, switching back restores Chinese.");
+            File.WriteAllText(report,"PASS: live Chinese/English switching across nine pages, saved language preference, navigation and full button hints, original filenames/paths/prompts/queue preserved, switching back restores Chinese.");
         }
         static IEnumerable<Control> ControlTree(Control c){foreach(Control child in c.Controls){yield return child;foreach(var next in ControlTree(child))yield return next;}}
         public void CheckButtonHints()
         {
-            foreach(int index in new[]{0,2,7,1,3,4,5,6}){SwitchPage(index);foreach(var button in ButtonTree(pages[index]))button.TestHint();}
+            foreach(int index in new[]{0,8,2,7,1,3,4,5,9,6}){SwitchPage(index);foreach(var button in ButtonTree(pages[index]))button.TestHint();}
             foreach(var button in navigationButtons)((SoftButton)button).TestHint();
             using(var button=new SoftButton{Text="完整的很长按钮名称"}){button.TestHint();button.Text="更新后的名称";button.TestHint();button.Text="";button.AccessibleName="复制正面 tag";button.TestHint();}
         }
@@ -822,7 +830,27 @@ namespace QQImageSwitch
             ((CoverCanvas)coverView).TestDrag(new Point(coverView.Width/2,coverView.Height/2),new Point(coverView.Width*2/3,coverView.Height*2/3));
             if(preferences.CoverText.X<55||preferences.CoverText.Y<55||preferences.CoverText.Position!=3)throw new Exception("Free text drag did not update image coordinates");
             if(coverCard.Height!=realCard.Height&&!stacked)throw new Exception("Parallel cards have different heights");
-            preferences.CoverText=previous;coverText.Text=previous.Text;textPosition.SelectedIndex=Array.IndexOf(PositionIds,previous.Position);textSize.Value=previous.SizePercent;textX.Value=previous.X;textY.Value=previous.Y;UpdateCoverText();
+            textLayers.TestAdd();coverText.Text="第二条文字";UpdateCoverText();textLayers.TestChoose(0);if(preferences.CoverText.Text!="点开原图"||preferences.CoverText.Extra[preferences.CoverText.Extra.Count-1].Text!="第二条文字")throw new Exception("Layer selection lost text");textLayers.TestChoose(preferences.CoverText.Extra.Count);textLayers.TestDelete();
+            preferences.CoverText=previous;textLayers.RefreshChoices();coverText.Text=previous.Text;textPosition.SelectedIndex=Array.IndexOf(PositionIds,previous.Position);textSize.Value=previous.SizePercent;textX.Value=previous.X;textY.Value=previous.Y;UpdateCoverText();
+        }
+        public async Task CheckDualPage(string folder)
+        {
+            Directory.CreateDirectory(folder);SwitchPage(0);LoadDemo();EnsureMergedRestore();
+            var paths=items.Select(i=>i.Path).ToArray();string text=coverText.Text;
+            foreach(bool english in new[]{false,true})
+            {
+                ChooseLanguage(english);
+                foreach(Size bounds in new[]{new Size(900,700),new Size(1500,950)})
+                {
+                    Size=bounds;Application.DoEvents();Relayout();ValidateLayout();
+                    if(Descendants(this).Any(c=>L.Canonical(c.Text)=="彩色背景双图"||L.Canonical(c.Text)=="灰度背景双图"))throw new Exception("Removed dual mode remains visible");
+                    if(english&&L.Untranslated(new[]{dualDescription.Text,coverHeading.Text,realHeading.Text}).Length!=0)throw new Exception("Dual captions were not translated");
+                    if(!items.Select(i=>i.Path).SequenceEqual(paths)||coverText.Text!=text)throw new Exception("Layout changed queued data");
+                    Codec.Restore(await BuildCurrent());
+                    if(bounds.Width==900){CaptureScroll(false);using(var shot=new Bitmap(Width,Height)){DrawToBitmap(shot,new Rectangle(Point.Empty,Size));shot.Save(Path.Combine(folder,(english?"en":"zh")+"-dual.png"));}}
+                }
+            }
+            ChooseLanguage(false);
         }
         public void ShowTextDemo(){coverText.Text="点击查看原图";textPosition.SelectedIndex=0;textX.Value=62;textY.Value=70;UpdateCoverText();CaptureScroll(false);}
         public void ShowBrushDemo(){SwitchPage(4);((RedactPage)pages[4]).ShowBrushDemo();}

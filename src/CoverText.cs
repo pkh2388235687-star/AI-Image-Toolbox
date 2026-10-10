@@ -1,4 +1,6 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -13,8 +15,15 @@ namespace QQImageSwitch
         public int X=50,Y=50;
         public int SizePercent=7;
         public Color Color=Color.White;
-        public CoverTextOptions Copy(){return new CoverTextOptions {Text=Text,Position=Position,X=X,Y=Y,SizePercent=SizePercent,Color=Color};}
+        public readonly List<CoverTextOptions> Extra=new List<CoverTextOptions>();
+        public void Assign(CoverTextOptions other){Text=other.Text;Position=other.Position;X=other.X;Y=other.Y;SizePercent=other.SizePercent;Color=other.Color;}
+        public CoverTextOptions Copy(){var result=new CoverTextOptions();result.Assign(this);foreach(var item in Extra.Take(31)){var layer=new CoverTextOptions();layer.Assign(item);result.Extra.Add(layer);}return result;}
+        public class LayerData {public string Text;public int Position,X,Y,Size,Ink;}
+        public string SaveLayers(){return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Inspection.Json().Serialize(Extra.Select(t=>new LayerData{Text=t.Text,Position=t.Position,X=t.X,Y=t.Y,Size=t.SizePercent,Ink=t.Color.ToArgb()}).ToArray())));}
+        public void LoadLayers(string value){if(string.IsNullOrEmpty(value)||value.Length>65536)return;try{var data=Inspection.Json().Deserialize<LayerData[]>(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(value)));if(data==null)return;Extra.Clear();foreach(var d in data.Where(item=>item!=null).Take(31))Extra.Add(new CoverTextOptions{Text=(d.Text??"").Substring(0,Math.Min(200,(d.Text??"").Length)),Position=Math.Max(0,Math.Min(9,d.Position)),X=Math.Max(0,Math.Min(100,d.X)),Y=Math.Max(0,Math.Min(100,d.Y)),SizePercent=Math.Max(2,Math.Min(18,d.Size)),Color=Color.FromArgb(255,Color.FromArgb(d.Ink))});}catch(ArgumentException){}catch(InvalidOperationException){} }
         public void Draw(Bitmap bitmap,bool numbered)
+        {DrawOne(bitmap,numbered);foreach(var layer in Extra.Take(31))layer.DrawOne(bitmap,numbered);}
+        void DrawOne(Bitmap bitmap,bool numbered)
         {
             string text=(Text??"").Trim();if(text.Length==0)return;
             if(text.Length>200)throw new ArgumentException("封面文字最多 200 个字。");
@@ -56,19 +65,26 @@ namespace QQImageSwitch
     public class CoverCanvas : ImageCanvas
     {
         public bool TextPlacement;
-        bool dragging;
+        public bool PlacementDragging {get{return dragging;}}
+        bool dragging,pending;Point pendingPoint;int lastX=-1,lastY=-1;
+        readonly Timer dragTimer=new Timer{Interval=33};
         public event EventHandler<TextPositionEventArgs> PositionChanged;
+        public CoverCanvas(){dragTimer.Tick+=delegate{if(pending){pending=false;Position(pendingPoint,false);}};}
         void Position(Point p,bool finished)
         {
             if(Image==null)return;
             var point=ToImage(p);
             int x=(int)Math.Round(point.X*100.0/Image.Width),y=(int)Math.Round(point.Y*100.0/Image.Height);
-            if(PositionChanged!=null)PositionChanged(this,new TextPositionEventArgs {X=Math.Max(0,Math.Min(100,x)),Y=Math.Max(0,Math.Min(100,y)),Finished=finished});
+            x=Math.Max(0,Math.Min(100,x));y=Math.Max(0,Math.Min(100,y));if(!finished&&x==lastX&&y==lastY)return;lastX=x;lastY=y;if(!finished)Interact();
+            if(PositionChanged!=null)PositionChanged(this,new TextPositionEventArgs {X=x,Y=y,Finished=finished});
         }
-        protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(TextPlacement&&Image!=null&&e.Button==MouseButtons.Left){dragging=true;Capture=true;Position(e.Location,false);}}
-        protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(dragging)Position(e.Location,false);}
-        protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(dragging){dragging=false;Capture=false;Position(e.Location,true);}}
+        protected override void OnMouseDown(MouseEventArgs e){base.OnMouseDown(e);if(TextPlacement&&Image!=null&&e.Button==MouseButtons.Left){dragging=true;pending=false;lastX=lastY=-1;Capture=true;Position(e.Location,false);dragTimer.Start();}}
+        protected override void OnMouseMove(MouseEventArgs e){base.OnMouseMove(e);if(dragging){pendingPoint=e.Location;pending=true;}}
+        protected override void OnMouseUp(MouseEventArgs e){base.OnMouseUp(e);if(dragging){dragging=false;pending=false;dragTimer.Stop();Position(e.Location,true);Capture=false;}}
+        protected override void OnMouseCaptureChanged(EventArgs e){base.OnMouseCaptureChanged(e);if(!Capture&&dragging){dragging=false;dragTimer.Stop();if(pending){pending=false;Position(pendingPoint,true);}}}
+        protected override void Dispose(bool disposing){if(disposing){dragTimer.Stop();dragTimer.Dispose();}base.Dispose(disposing);}
         protected override void OnClick(EventArgs e){if(!TextPlacement)base.OnClick(e);}
         internal void TestDrag(Point a,Point b){OnMouseDown(new MouseEventArgs(MouseButtons.Left,1,a.X,a.Y,0));OnMouseMove(new MouseEventArgs(MouseButtons.Left,1,b.X,b.Y,0));OnMouseUp(new MouseEventArgs(MouseButtons.Left,1,b.X,b.Y,0));}
+        internal void TestBurst(Point a,Point b,int count){OnMouseDown(new MouseEventArgs(MouseButtons.Left,1,a.X,a.Y,0));for(int i=1;i<=count;i++)OnMouseMove(new MouseEventArgs(MouseButtons.Left,1,a.X+(b.X-a.X)*i/count,a.Y+(b.Y-a.Y)*i/count,0));OnMouseUp(new MouseEventArgs(MouseButtons.Left,1,b.X,b.Y,0));}
     }
 }

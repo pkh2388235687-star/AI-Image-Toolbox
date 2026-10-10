@@ -78,9 +78,9 @@ namespace QQImageSwitch
                     g.DrawString(text,font,ink,circle,format);
             }
         }
-        public static byte[] Build(Image cover,Image real,int maxSide,int number,bool stamp,Color? background=null,CoverTextOptions text=null)
+        public static byte[] Build(Image cover,Image real,int maxSide,int number,bool stamp,Color? background=null,CoverTextOptions text=null,CancellationToken token=default(CancellationToken))
         {
-            Size size=Codec.OutputSize(real,maxSide);
+            token.ThrowIfCancellationRequested();Size size=Codec.OutputSize(real,maxSide);
             using(var r=Codec.Fit(real,size.Width,size.Height,Color.Transparent))
             using(var c=MakeCover(cover,size.Width,size.Height,number,stamp,background,text))
                 return Codec.Encode(c,r);
@@ -111,12 +111,13 @@ namespace QQImageSwitch
                     using(var localCover=items[i].OwnCover && items[i].CoverPath!=null ? Codec.Load(items[i].CoverPath) : null)
                     {
                         Image effectiveCover=items[i].OwnCover ? localCover : cover;
-                        byte[] png=Build(effectiveCover,real,maxSide,i+1,stamp,background,text);
+                        byte[] png=Build(effectiveCover,real,maxSide,i+1,stamp,background,text,token);
                         if(token.IsCancellationRequested){result.Cancelled=true;break;}
                         string output=UniqueOutput(folder,i+1,items[i].Name);
                         Codec.SaveAtomic(output,png);result.Files.Add(output);state="已导出";
                     }
                 }
+                catch(OperationCanceledException){result.Cancelled=true;break;}
                 catch(Exception ex){state="失败";result.Errors.Add((i+1)+". "+items[i].Name+"："+ex.Message);}
                 if(progress!=null)progress.Report(new BatchProgress {Index=i,Completed=i+1,Total=items.Count,State=state});
             }

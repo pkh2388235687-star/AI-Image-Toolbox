@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -29,6 +29,7 @@ namespace QQImageSwitch
                 {
                     int split=line.IndexOf('=');if(split<0)continue;var parts=new[]{line.Substring(0,split),line.Substring(split+1)};
                     if(parts[0]=="covertext"){try{CoverText.Text=System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(parts[1]));if(CoverText.Text.Length>200)CoverText.Text=CoverText.Text.Substring(0,200);}catch(FormatException){}continue;}
+                    if(parts[0]=="textlayers"){CoverText.LoadLayers(parts[1]);continue;}
                     if(parts[0]=="language"){Language=parts[1]=="en"?"en":"zh";continue;}
                     if(!int.TryParse(parts[1],out v))continue;
                     switch(parts[0])
@@ -52,7 +53,7 @@ namespace QQImageSwitch
         public void Save()
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(file)));
-            Codec.SaveAtomic(file,System.Text.Encoding.UTF8.GetBytes("language="+Language+"\ncolor="+PaddingColor.ToArgb()+"\nnumber="+(Numbered?1:0)+"\nresolution="+Resolution+"\ndelay="+GifDelay+"\ngifsize="+GifSize+"\nloop="+(Loop?1:0)+"\ncovertext="+Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(CoverText.Text??""))+"\ntextposition="+CoverText.Position+"\ntextsize="+CoverText.SizePercent+"\ntextcolor="+CoverText.Color.ToArgb()+"\ntextx="+CoverText.X+"\ntexty="+CoverText.Y));
+            Codec.SaveAtomic(file,System.Text.Encoding.UTF8.GetBytes("language="+Language+"\ncolor="+PaddingColor.ToArgb()+"\nnumber="+(Numbered?1:0)+"\nresolution="+Resolution+"\ndelay="+GifDelay+"\ngifsize="+GifSize+"\nloop="+(Loop?1:0)+"\ncovertext="+Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(CoverText.Text??""))+"\ntextposition="+CoverText.Position+"\ntextsize="+CoverText.SizePercent+"\ntextcolor="+CoverText.Color.ToArgb()+"\ntextx="+CoverText.X+"\ntexty="+CoverText.Y+"\ntextlayers="+CoverText.SaveLayers()));
         }
     }
     public class FolderPicker : TableLayoutPanel
@@ -119,7 +120,7 @@ namespace QQImageSwitch
             Body=Ui.Column(new Padding(0));Body.Width=1030;Body.SuspendLayout();Scroller.Controls.Add(Body);
             Ui.Add(Body,Ui.Text(title,21,true));Ui.Add(Body,Ui.Text(description,10));
             Footer=Ui.Footer(new Padding(22,12,22,12));Footer.SuspendLayout();Controls.Add(Footer);Scroller.BringToFront();
-            string feature=title=="合成 GIF"?"合成GIF":title=="还原隐藏图"?"双图切换":title=="清除图片信息"?"清信息":title=="打码 / 模糊"?"打码":title=="tag读取"?"tag读取":title=="文件伪装"?"文件伪装":title=="图片混淆"?"图片混淆":null;
+            string feature=title=="合成 GIF"?"合成GIF":title=="还原隐藏图"?"双图切换":title=="清除图片信息"?"清信息":title=="打码 / 模糊"?"打码":title=="tag读取"?"tag读取":title=="文件伪装"?"文件伪装":title=="图片混淆"?"图片混淆":title=="二维码制作"?"二维码制作":null;
             OutputFolder=new FolderPicker(location,feature);Ui.Add(Footer,OutputFolder);
             Actions=Ui.Flow();Ui.Add(Footer,Actions);
             stop=Ui.Button("停止任务",delegate{Cancel();});stop.Visible=false;Actions.Controls.Add(stop);
@@ -201,6 +202,8 @@ namespace QQImageSwitch
         readonly Button preview;
         Bitmap image;
         bool hidden=true,playing;
+        int dualPreviewVersion;
+        Button hiddenButton,coverButton,restoreButton;
         int frame;
         public FileToolPage(int mode,ExportLocation location,ToolPreferences prefs,Action<bool> busyChanged)
             :base(mode==1?"合成 GIF":mode==2?"还原隐藏图":"清除图片信息",
@@ -226,9 +229,9 @@ namespace QQImageSwitch
                 delay.ValueChanged+=delegate{timer.Interval=(int)delay.Value;};
                 Ui.Add(Body,Ui.Text("画布比例取第一张图，其他图片等比居中；留边使用设置中的颜色。GIF 限制为 256 色，透明处填充留边颜色。输入动图只取首帧。",9));
             }
-            if(kind==2)Ui.Add(Body,Ui.Flow(Ui.Button("查看隐藏图",delegate{hidden=true;ShowSelected();}),Ui.Button("查看聊天封面",delegate{hidden=false;ShowSelected();})));
+            if(kind==2){hiddenButton=Ui.Button("查看隐藏图",delegate{hidden=true;ShowSelected();});coverButton=Ui.Button("查看聊天封面",delegate{hidden=false;ShowSelected();});Ui.Add(Body,Ui.Flow(hiddenButton,coverButton));}
             if(kind==3)Ui.Add(Body,Ui.Text("支持 PNG / APNG、JPEG、WebP 和 GIF。删除工作流、提示词、文本、拍摄信息等，保留原始图像数据、色彩配置、方向和动画。PNG 清理后会检查文本 / comf 工作流块确已移除。",9));
-            ActionButton(kind==1?"导出 GIF":kind==2?"批量还原并导出":"批量清信息并导出",async delegate{await Export();});
+            restoreButton=ActionButton(kind==1?"导出 GIF":kind==2?"批量还原并导出":"批量清信息并导出",async delegate{await Export();});
             foreach(Control c in new Control[]{canvas,list,this})
             {
                 c.AllowDrop=true;c.DragEnter+=delegate(object s,DragEventArgs e){if(!Busy&&e.Data.GetDataPresent(DataFormats.FileDrop))e.Effect=DragDropEffects.Copy;};
@@ -237,7 +240,7 @@ namespace QQImageSwitch
             FinishLayout();SetPreviewViewport(Scroller);
         }
         internal void SetPreviewViewport(Control viewport){canvas.FollowViewport(viewport,.54,230,720);}
-        public static NumericUpDown Number(int min,int max,int value){return new NumericUpDown {Minimum=min,Maximum=max,Value=value,Width=115,Margin=new Padding(0,0,16,10)};}
+        public static NumericUpDown Number(int min,int max,int value){return new SoftNumber {Minimum=min,Maximum=max,Value=value,Width=115,Margin=new Padding(0,0,16,10)};}
         internal async Task Pick()
         {
             if(Busy)return;using(var d=new OpenFileDialog {Title="批量导入图片",Filter=kind==2?"双图 PNG|*.png;*.apng":kind==3?"图片|*.png;*.apng;*.webp;*.jpg;*.jpeg;*.gif":"图片|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff",Multiselect=true})
@@ -274,9 +277,10 @@ namespace QQImageSwitch
             list.EndUpdate();if(files.Count>0)list.SelectedIndex=Math.Min(Math.Max(0,selected),files.Count-1);else ShowSelected();
         }
         string DisplayName(int index){return temp.Contains(files[index])?"示例图片_"+(index+1)+".png":Path.GetFileName(files[index]);}
-        void ShowSelected(){if(list.SelectedIndex>=0)ShowFrame(list.SelectedIndex);else{if(image!=null)image.Dispose();image=null;canvas.Image=null;canvas.EmptyText="点击导入图片\n或把文件拖到这里";canvas.Invalidate();fileInfo.Text="尚未导入图片";}}
+        void ShowSelected(){dualPreviewVersion++;if(list.SelectedIndex>=0)ShowFrame(list.SelectedIndex);else{if(image!=null)image.Dispose();image=null;canvas.Image=null;canvas.EmptyText="点击导入图片\n或把文件拖到这里";canvas.Invalidate();fileInfo.Text="尚未导入图片";}}
         void ShowFrame(int index)
         {
+            if(kind==2){ShowDualFrame(index);return;}
             try
             {
                 var next=kind==2&&hidden?Codec.Decode(Codec.Restore(ImageTools.Read(files[index]))):Codec.Load(files[index]);
@@ -296,6 +300,30 @@ namespace QQImageSwitch
         void Clear(){if(Busy)return;StopPreview();files.Clear();Refresh();}
         void MoveFrame(int offset)
         {if(Busy)return;StopPreview();if(list.SelectedIndices.Count!=1){Status.Text="请只选中一张，再调整顺序。";return;}int i=list.SelectedIndex,n=i+offset;if(n<0||n>=files.Count)return;string value=files[i];files.RemoveAt(i);files.Insert(n,value);Refresh(n);}
+        async void ShowDualFrame(int index)
+        {
+            int version=++dualPreviewVersion;bool black=hidden;string path=files[index];Bitmap next=null;
+            try
+            {
+                next=await Task.Run(()=>
+                {
+                    using(var source=DualBlend.DecodeView(ImageTools.Read(path),black,CancellationToken.None))
+                    {
+                        Size bounds=Codec.OutputSize(source,720);
+                        using(var fitted=Codec.Fit(source,bounds.Width,bounds.Height,Color.Transparent))
+                            return (Bitmap)fitted.Clone();
+                    }
+                });
+                if(IsDisposed||Disposing||version!=dualPreviewVersion){next.Dispose();return;}
+                if(image!=null)image.Dispose();image=next;next=null;canvas.Image=image;canvas.Invalidate();
+                fileInfo.Text=(index+1)+" / "+files.Count+"  ·  "+DisplayName(index)+"  ·  "+image.Width+" × "+image.Height;
+            }
+            catch(Exception ex)
+            {
+                if(next!=null)next.Dispose();if(IsDisposed||Disposing||version!=dualPreviewVersion)return;
+                canvas.Image=null;if(image!=null){image.Dispose();image=null;}canvas.EmptyText="无法预览此图\n请检查图片文件";canvas.Invalidate();fileInfo.Text=Path.GetFileName(path)+"："+ex.Message;
+            }
+        }
         internal void ConfigureEmbeddedRestore(Func<string> root){embeddedRoot=root;OutputFolder.SetFeature("双图切换");foreach(Control c in Body.Controls)if(c is Label&&c.Text=="还原隐藏图")c.Text="还原双图 PNG";}
         async Task Export(bool report=true)
         {
@@ -320,7 +348,7 @@ namespace QQImageSwitch
                     if(token.IsCancellationRequested){stopped=true;break;}
                     try
                     {
-                        if(kind==2){byte[] restored=Codec.Restore(ImageTools.Read(snapshot[i]));Codec.SaveAtomic(ImageTools.Unique(folder,snapshot[i],"_已还原",".png"),restored);}
+                        if(kind==2){byte[] input=ImageTools.Read(snapshot[i]);if(DualBlend.IsLegacy(input))DualBlend.RestorePair(snapshot[i],folder,token);else{byte[] restored=Codec.Restore(input);token.ThrowIfCancellationRequested();Codec.SaveAtomic(ImageTools.Unique(folder,snapshot[i],"_已还原",".png"),restored);}}
                         else ImageTools.Clean(snapshot[i],folder);count++;
                     }
                     catch(OperationCanceledException){stopped=true;break;}
@@ -340,6 +368,9 @@ namespace QQImageSwitch
             var before=Directory.Exists(destination)?Directory.GetFiles(destination).ToList():new List<string>();await Export(false);var created=Directory.GetFiles(destination).Except(before).ToArray();
             if(Busy||created.Length!=1||!Codec.Restore(File.ReadAllBytes(input)).SequenceEqual(File.ReadAllBytes(created[0])))throw new Exception("Embedded PNG restoration/shared folder failed");
             if(OutputFolder.ExistingDestination!=destination||Directory.Exists(Path.Combine(folder,"还原")))throw new Exception("Restore created/reported an obsolete folder");
+            Clear();string legacy=Path.Combine(folder,"old-transparent.png");File.WriteAllBytes(legacy,Convert.FromBase64String(DualBlendTests.Samples[1]));await Import(new[]{input,legacy});
+            before=Directory.GetFiles(destination).ToList();await Export(false);created=Directory.GetFiles(destination).Except(before).ToArray();
+            if(Busy||created.Length!=3)throw new Exception("Mixed dynamic/legacy restoration did not export three files");
             Clear();string empty=Path.Combine(folder,"empty-export-"+Guid.NewGuid().ToString("N"));OutputFolder.TestSetFolder(empty);var previousRoot=embeddedRoot;
             try{embeddedRoot=delegate{throw new Exception("Empty restore requested an output folder");};await Export(false);}finally{embeddedRoot=previousRoot;}
             if(Directory.Exists(empty))throw new Exception("Empty restore export created a directory");
@@ -361,7 +392,7 @@ namespace QQImageSwitch
         }
 #endif
         protected override void Dispose(bool disposing)
-        {if(disposing){if(timer!=null)timer.Dispose();if(image!=null){canvas.Image=null;image.Dispose();}foreach(string p in temp)try{File.Delete(p);}catch(IOException){}}base.Dispose(disposing);}
+        {if(disposing){dualPreviewVersion++;if(timer!=null)timer.Dispose();if(image!=null){canvas.Image=null;image.Dispose();}foreach(string p in temp)try{File.Delete(p);}catch(IOException){}}base.Dispose(disposing);}
     }
     public class RedactCanvas : ImageCanvas
     {
@@ -456,7 +487,7 @@ namespace QQImageSwitch
         readonly SoftCombo mode,effect;
         readonly NumericUpDown brush,strength;
         readonly Label info;
-        readonly List<Bitmap> history=new List<Bitmap>();
+        readonly BitmapHistory history=new BitmapHistory();
         Bitmap original,current;
         string name="图片.png";
         Color fill=Color.Black;
@@ -466,7 +497,7 @@ namespace QQImageSwitch
         bool disposingView;
         public RedactPage(ExportLocation location,Action<bool> busyChanged):base("打码 / 模糊","先导入图片，在图上框选或涂抹，然后应用效果。支持撤销和恢复原图。",location,busyChanged)
         {
-            Ui.Add(Body,Ui.Flow(Ui.Button("打开图片…",async delegate{await Pick();},true),Ui.Button("撤销一步",delegate{Undo();}),Ui.Button("恢复原图",delegate{Reset();}),Ui.Button("适应窗口",delegate{canvas.ResetView();}),Ui.Button("原始比例",delegate{canvas.ActualPixels();})));
+            Ui.Add(Body,Ui.Flow(Ui.Button("打开图片…",async delegate{await Pick();},true),Ui.Button("撤销一步",async delegate{await MoveHistory(false);}),Ui.Button("重做一步",async delegate{await MoveHistory(true);}),Ui.Button("恢复原图",delegate{Reset();}),Ui.Button("适应窗口",delegate{canvas.ResetView();}),Ui.Button("原始比例",delegate{canvas.ActualPixels();})));
             mode=new SoftCombo {DropDownStyle=ComboBoxStyle.DropDownList,Width=135,Margin=new Padding(0,0,14,10)};mode.Items.AddRange(new object[]{"框选区域","涂抹画笔"});mode.SelectedIndex=0;
             effect=new SoftCombo {DropDownStyle=ComboBoxStyle.DropDownList,Width=135,Margin=new Padding(0,0,14,10)};effect.Items.AddRange(new object[]{"马赛克","模糊","纯色遮盖"});effect.SelectedIndex=0;
             brush=FileToolPage.Number(4,500,36);strength=FileToolPage.Number(2,100,16);
@@ -477,7 +508,7 @@ namespace QQImageSwitch
             canvas=new RedactCanvas {Dock=DockStyle.Fill,Height=640,MinimumSize=new Size(0,300),Margin=new Padding(0,0,0,12),Cursor=Cursors.Cross,EmptyText="点击打开图片\n或拖入一张图片"};Ui.Add(Body,canvas);
             info=Ui.Text("尚未打开图片",9);Ui.Add(Body,info);
             ActionButton("应用到选区",async delegate{await Apply();});ActionButton("清除选区",delegate{canvas.ClearSelection();},false);
-            Ui.Add(Body,Ui.Text("选区外的像素保持不变，保存为原尺寸 PNG。GIF / 多页 TIFF 仅编辑首帧。撤销历史按图片大小保留最近 1 至 5 步。",9));
+            Ui.Add(Body,Ui.Text("选区外的像素保持不变，保存为原尺寸 PNG。GIF / 多页 TIFF 仅编辑首帧。撤销与重做最多保留 50 步，临时历史总计最多 256 MiB；新操作会清空重做历史。",9));
             mode.SelectedIndexChanged+=delegate{canvas.Brush=mode.SelectedIndex==1;canvas.ClearSelection();};brush.ValueChanged+=delegate{ConfigureBrush();};strength.ValueChanged+=delegate{ConfigureBrush();};effect.SelectedIndexChanged+=delegate{ConfigureBrush();};
             canvas.BrushSizeRequested+=delta=>brush.Value=Math.Max(brush.Minimum,Math.Min(brush.Maximum,brush.Value+delta));
             zoomDebounce.Tick+=delegate{zoomDebounce.Stop();zoomLabel.Text="缩放 "+(canvas.PixelScale*100).ToString("0")+"% · 滚轮缩放 · 中键拖动 · [ / ] 调画笔 · 圆圈实时预览";};
@@ -496,21 +527,21 @@ namespace QQImageSwitch
         {
             await Run(async token=>{var bitmap=await Task.Run(()=>Codec.Load(path));DisposeImages();original=bitmap;current=(Bitmap)original.Clone();name=Path.GetFileName(path);ShowImage();canvas.ResetView();return "已打开 "+name+"，可用滚轮缩放和中键平移进行编辑。";},false);
         }
-        void ShowImage(){canvas.Image=current;canvas.ClearSelection();canvas.RefreshBrush();canvas.Invalidate();info.Text=current==null?"尚未打开图片":name+"  ·  "+current.Width+" × "+current.Height+"  ·  可撤销 "+history.Count+" 步";}
+        void ShowImage(){canvas.Image=current;canvas.ClearSelection();canvas.RefreshBrush();canvas.Invalidate();info.Text=current==null?"尚未打开图片":name+"  ·  "+current.Width+" × "+current.Height+"  ·  可撤销 "+history.Count+" 步 · "+L.T("可重做")+" "+history.RedoCount+" 步";}
         async Task Apply()
         {
             if(Busy||current==null)return;if(canvas.Selection.IsEmpty&&canvas.Stroke.Count==0){Status.Text="请先在图上框选或涂抹。";return;}
             var selection=canvas.Selection;var path=canvas.Brush?canvas.Stroke.ToList():null;int width=(int)brush.Value,block=(int)strength.Value;string operation=new[]{"mosaic","blur","solid"}[effect.SelectedIndex];Color color=fill;
             await Run(async token=>
             {
-                var next=await Task.Run(()=>ImageTools.Redact(current,selection,path,width,block,operation,color));history.Add(current);current=next;
-                int limit=Math.Max(1,Math.Min(5,(int)(64L*1024*1024/Math.Max(1,(long)current.Width*current.Height*4))));
-                while(history.Count>limit){history[0].Dispose();history.RemoveAt(0);}ShowImage();return "已应用效果。可继续选择其他区域，也可撤销。";
+                var next=await Task.Run(()=>{var b=ImageTools.Redact(current,selection,path,width,block,operation,color);try{token.ThrowIfCancellationRequested();history.Push(current);return b;}catch{b.Dispose();throw;}});current.Dispose();current=next;
+                ShowImage();return "已应用效果。可继续选择其他区域，也可撤销。";
             },false);
         }
-        void Undo(){if(Busy||history.Count==0)return;current.Dispose();current=history[history.Count-1];history.RemoveAt(history.Count-1);ShowImage();}
-        void Reset(){if(Busy||original==null)return;if(current!=null)current.Dispose();foreach(var image in history)image.Dispose();history.Clear();current=(Bitmap)original.Clone();ShowImage();}
-        void DisposeImages(){canvas.Image=null;if(original!=null)original.Dispose();if(current!=null)current.Dispose();foreach(var image in history)image.Dispose();history.Clear();original=current=null;}
+        void Undo(){if(Busy||history.Count==0)return;var next=history.Move(current,false);current.Dispose();current=next;ShowImage();}
+        async Task MoveHistory(bool forward){if(Busy||current==null||(forward?history.RedoCount:history.Count)==0)return;await Run(async token=>{var next=await Task.Run(()=>history.Move(current,forward));if(next!=null){current.Dispose();current=next;ShowImage();}return L.T(forward?"已重做。":"已撤销。");},false);}
+        void Reset(){if(Busy||original==null)return;if(current!=null)current.Dispose();history.Clear();current=(Bitmap)original.Clone();ShowImage();}
+        void DisposeImages(){canvas.Image=null;if(original!=null)original.Dispose();if(current!=null)current.Dispose();history.Clear();original=current=null;}
 #if SELF_TEST
         public override void Demo(){if(original!=null)return;original=SelfTest.Art(700,520,true);name="编辑示例.png";current=ImageTools.Redact(original,new Rectangle(190,230,280,110),null,36,24,"mosaic",Color.Black);ShowImage();}
         public void ShowBrushDemo(){Demo();mode.SelectedIndex=1;brush.Value=90;strength.Value=32;canvas.TestPointer(Point.Round(canvas.ToScreen(new Point(350,240))));}
@@ -520,7 +551,7 @@ namespace QQImageSwitch
             canvas.TestGesture(new Point(canvas.Width/3,canvas.Height/3),new Point(canvas.Width*2/3,canvas.Height*2/3));
             if(canvas.Selection.IsEmpty)throw new Exception("Rectangle gesture was not mapped to image pixels");
             await Apply();if(history.Count!=1||before.SequenceEqual(Codec.StaticPng(current)))throw new Exception("Apply button did not edit selection");
-            Undo();if(!before.SequenceEqual(Codec.StaticPng(current)))throw new Exception("Undo did not restore original image");
+            byte[] edited=Codec.StaticPng(current);await MoveHistory(false);await MoveHistory(true);if(!edited.SequenceEqual(Codec.StaticPng(current)))throw new Exception("Redo failed");Undo();if(!before.SequenceEqual(Codec.StaticPng(current)))throw new Exception("Undo did not restore original image");
             for(int i=0;i<4;i++){mode.TestChoice(i%2);effect.TestChoice(i%3);}
             mode.TestChoice(1);effect.TestChoice(0);
             canvas.TestGesture(new Point(canvas.Width/3,canvas.Height/2),new Point(canvas.Width*2/3,canvas.Height/2));
@@ -576,7 +607,7 @@ namespace QQImageSwitch
             defaultNumber=numbered;defaultResolution=resolution;defaultDelay=delay;defaultSize=size;defaultLoop=loop;
             Action save=()=>{if(refreshing)return;prefs.Numbered=numbered.Checked;prefs.Resolution=resolution.SelectedIndex;prefs.GifDelay=(int)delay.Value;prefs.GifSize=(int)size.Value;prefs.Loop=loop.Checked;Save(changed);};
             numbered.CheckedChanged+=delegate{save();};resolution.SelectedIndexChanged+=delegate{save();};delay.ValueChanged+=delegate{save();};size.ValueChanged+=delegate{save();};loop.CheckedChanged+=delegate{save();};
-            Ui.Add(Body,Ui.Text("关于",13,true));Ui.Add(Body,Ui.Text("工具集合 · Windows\n图片均在本机处理，无需联网或登录。各页面的图片队列在切换时保留，关闭程序后清空。原始文件保留，输出重名时自动加后缀。",10));
+            Ui.Add(Body,Ui.Text("关于",13,true));Ui.Add(Body,Ui.Text("工具集合 · Windows\n图片与二维码均在本机处理；打开网站需要网络及网站规定的访问权限。各页面的图片队列在切换时保留，关闭程序后清空。原始文件保留，输出重名时自动加后缀。",10));
             Ui.Add(Body,Ui.Text("个人制作信息",13,true));Ui.Add(Body,Ui.Text("制作：光影若水",10));
             Ui.Add(Body,Ui.Text("https://github.com/pkh2388235687-star/AI-Image-Toolbox",10));
             Ui.Add(Body,Ui.Flow(Ui.Button("打开 GitHub 项目",delegate{try{Process.Start(new ProcessStartInfo("https://github.com/pkh2388235687-star/AI-Image-Toolbox"){UseShellExecute=true});}catch(Exception){Status.Text=string.Format(L.T("无法打开浏览器，请手动访问：{0}"),"https://github.com/pkh2388235687-star/AI-Image-Toolbox");}})));

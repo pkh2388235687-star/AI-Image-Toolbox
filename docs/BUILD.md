@@ -4,7 +4,7 @@
 
 ## Windows
 
-需要 Windows 的 .NET Framework 4.x 编译器、PowerShell 和 Python 3.10+；程序建议使用 .NET Framework 4.8。无需 NuGet 包。在仓库根目录运行：
+需要 Windows 的 .NET Framework 4.x 编译器、PowerShell 和 Python 3.10+；程序建议使用 .NET Framework 4.8。固定版本二维码库已包含在 `vendor/zxing/`，无需构建时下载 NuGet 包。在仓库根目录运行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ./build.ps1
@@ -60,3 +60,9 @@ adb shell am start -n com.guangyingruoshui.imagetools/.MainActivity --ez selftes
 ## 上传
 
 源文件、两端最新安装包和说明放在同一个仓库即可。`build/`、`__pycache__/`、本地 SDK、签名文件不上传。自动检查验证文件名、隐私文件和正式包结构。GitHub CI 不发布安装包、不提交构建后的二进制文件。
+
+## 二维码依赖与新增检查
+
+Windows 内嵌 ZXing.Net 0.16.11，Android 编译 ZXing core 3.5.4。固定库、SHA-256 与完整 Apache-2.0 许可见 [vendor/zxing](../vendor/zxing/README.md)，运行时不下载依赖。
+
+`--self-test` 包含二维码、白边、联动不透明区、封面灰度隔离、多文字和历史检查；`--ui-test` 包含新页面中英文布局及导出/导入。Android `--test` 编译对应原生位图与触摸检查，只有在真机或模拟器执行才算通过；相机需要实际设备单独测试。

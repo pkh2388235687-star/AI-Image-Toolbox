@@ -44,14 +44,14 @@ namespace QQImageSwitch
         static string Hex(byte[] b){return BitConverter.ToString(b).Replace("-","").ToLowerInvariant();}
         internal static uint Crc(byte[] b,int p,int count){uint c=0xffffffff;for(int i=p;i<p+count;i++){c^=b[i];for(int n=0;n<8;n++)c=(c&1)!=0?0xedb88320^(c>>1):c>>1;}return c^0xffffffff;}
         static bool Starts(byte[] b,params byte[] prefix){return b.Length>=prefix.Length&&prefix.Select((v,i)=>b[i]==v).All(v=>v);}
-        static void SafeName(string name)
+        internal static void SafeName(string name)
         {
             if(string.IsNullOrWhiteSpace(name)||name!=Path.GetFileName(name)||name.IndexOfAny(Path.GetInvalidFileNameChars())>=0||name.Any(char.IsControl)||name.EndsWith(".")||name.EndsWith(" ")||Utf8.GetByteCount(name)>1024)throw new InvalidDataException("原文件名无效。");
             string stem=Path.GetFileNameWithoutExtension(name).Split('.')[0].ToUpperInvariant();
             if(new[]{"CON","PRN","AUX","NUL","CLOCK$"}.Contains(stem)||System.Text.RegularExpressions.Regex.IsMatch(stem,@"^(COM|LPT)[1-9]$"))throw new InvalidDataException("原文件名不能使用系统设备名称。");
         }
         // Parse the image prefix only, never pass the entire large disguised file to an image decoder.
-        static int Jpeg(byte[] b,out byte[] metadata)
+        internal static int Jpeg(byte[] b,out byte[] metadata)
         {
             metadata=null;if(!Starts(b,255,216))throw new InvalidDataException("不是有效的 JPG 文件。");int p=2;bool scan=false,frame=false;
             while(p<b.Length)
@@ -115,6 +115,7 @@ namespace QQImageSwitch
         public static byte[] Preview(string path){using(var s=Open(path)){byte[] cover;Header(s,out cover);return cover;}}
         public static HiddenFileInfo Inspect(string path){using(var s=Open(path)){byte[] cover;return Header(s,out cover);}}
         public static void ValidateFile(string path,CancellationToken token){SingleFile(path);using(var s=Open(path))Validate(s,Kind(Path.GetExtension(path)),token);}
+        internal static void ValidateFileAs(string path,string extension,CancellationToken token){using(var s=Open(path))Validate(s,Kind(extension),token);}
         static byte[] CopyHash(Stream input,Stream output,long count,CancellationToken token,IProgress<FileProgress> progress,string stage)
         {
             byte[] buffer=new byte[BufferSize];long done=0,lastTicks=0;using(var hash=SHA256.Create())
@@ -202,7 +203,7 @@ namespace QQImageSwitch
         }
         // Only ZIP directory offsets change. Entry bytes, passwords and compression stay intact.
         // Undo these additions before committing a restored ZIP and require its original hash.
-        static void ZipOffsets(Stream s,long start,long length,long delta,CancellationToken token)
+        internal static void ZipOffsets(Stream s,long start,long length,long delta,CancellationToken token)
         {
             long shift=delta<0?-delta:0;int tail=(int)Math.Min(65557,length);s.Position=start+length-tail;var b=Bytes(s,tail);int end=-1;
             for(int i=b.Length-22;i>=0;i--)if(U32(b,i)==0x06054b50&&i+22+U16(b,i+20)==b.Length){end=i;break;}

@@ -79,12 +79,12 @@ def main():
     argfile = out / 'javac.args'
     argfile.write_text('\n'.join('"' + str(p).replace('\\', '/') + '"' for p in sources), encoding='utf-8')
     run([java / ('bin/javac' + SUFFIX), '-encoding', 'UTF-8', '-source', '8', '-target', '8',
-         '-classpath', platform, '-d', classes, '@' + str(argfile)])
+         '-classpath', str(platform) + os.pathsep + str(REPO / 'vendor/zxing/zxing-core.jar'), '-d', classes, '@' + str(argfile)])
     with zipfile.ZipFile(out / 'classes.jar', 'w') as archive:
         for path in sorted(classes.rglob('*.class')):
             archive.write(path, path.relative_to(classes).as_posix())
     run([java / ('bin/java' + SUFFIX), '-cp', tools / 'lib/d8.jar', 'com.android.tools.r8.D8',
-         '--release', '--min-api', '21', '--lib', platform, '--output', out, out / 'classes.jar'])
+         '--release', '--min-api', '21', '--lib', platform, '--output', out, out / 'classes.jar', REPO / 'vendor/zxing/zxing-core.jar'])
     with zipfile.ZipFile(out / 'unsigned.apk', 'a') as archive:
         archive.write(out / 'classes.dex', 'classes.dex')
     run([tools / ('zipalign' + SUFFIX), '-f', '4', out / 'unsigned.apk', out / 'aligned.apk'])

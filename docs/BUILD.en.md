@@ -62,3 +62,9 @@ The author's existing key is stored outside this repository. Back it up and reus
 ## Upload
 
 Upload sources, documentation and the two latest packages to one repository. Do not include `build/`, Python caches, SDKs or signing files. Automated checks inspect filenames, private files and release-package structure. CI does not publish packages or commit updated binaries.
+
+## QR dependencies and new checks
+
+Windows embeds ZXing.Net 0.16.11; Android compiles ZXing core 3.5.4. Pinned libraries, SHA-256 and the full Apache-2.0 license are in [vendor/zxing](../vendor/zxing/README.md). No runtime dependency downloads.
+
+`--self-test` includes QR/border/opaque-linkage checks, grayscale isolation, text layers and history. `--ui-test` covers bilingual layouts and QR export/import. Android `--test` compiles corresponding native bitmap/touch checks; compiling them does not count as running device tests. Camera capture needs separate physical-device validation.

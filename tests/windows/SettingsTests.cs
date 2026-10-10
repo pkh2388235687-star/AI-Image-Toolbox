@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
@@ -32,14 +32,14 @@ namespace QQImageSwitch
             File.WriteAllText(file,"invalid-relative-folder");
             if(settings.Load()!="")throw new Exception("Malformed preference should not prevent startup");
             settings.Save(second);
-            foreach(string feature in new[]{"双图切换","图片混淆","合成GIF","清信息","打码","tag读取","文件伪装"})
+            foreach(string feature in new[]{"双图切换","背景显图","图片混淆","合成GIF","清信息","打码","tag读取","文件伪装","二维码制作"})
             {
                 string child=ExportLocation.FunctionFolder(second,feature);
                 if(child!=Path.Combine(second,feature)||!Directory.Exists(child)||settings.Load()!=second)throw new Exception("Function folder changed root preference or used wrong child folder");
                 using(var picker=new FolderPicker(settings,feature))if(picker.Destination!=child)throw new Exception("Page export destination ignores feature folder");
             }
             string untouched=Path.Combine(dir,"路径检查-"+Guid.NewGuid().ToString("N"));settings.Save(untouched);
-            foreach(string feature in new[]{"双图切换","图片混淆","合成GIF","清信息","打码","tag读取","文件伪装","还原"})
+            foreach(string feature in new[]{"双图切换","背景显图","图片混淆","合成GIF","清信息","打码","tag读取","文件伪装","二维码制作","还原"})
             {
                 using(var picker=new FolderPicker(settings,feature))
                 {
